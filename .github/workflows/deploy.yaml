@@ -1,4 +1,4 @@
-name: Deploy Observability Stack
+name: Deploy to Local Kind via Tailscale
 
 on:
   push:
@@ -6,41 +6,68 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install Helm
-        uses: azure/setup-helm@v3
+      # -------------------------------
+      # Install Tailscale (versioned)
+      # -------------------------------
+      - name: Install Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          version: "v1.68.1"
+          authkey: ${{ secrets.TS_AUTHKEY }}
 
+      # -------------------------------
+      # Restore kubeconfig
+      # -------------------------------
+      - name: Restore kubeconfig
+        run: |
+          echo "${{ secrets.KUBECONFIG_REMOTE }}" | base64 -d > kubeconfig.yaml
+          chmod 600 kubeconfig.yaml
+
+      # -------------------------------
+      # Install kubectl (versioned)
+      # -------------------------------
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      # -------------------------------
+      # Install Helm (versioned)
+      # -------------------------------
+      - name: Install Helm
+        run: |
+          curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+          sed -i 's/helm_version="latest"/helm_version="v3.14.4"/' get_helm.sh
+          bash get_helm.sh
+
+      # -------------------------------
+      # Install Helmfile (versioned)
+      # -------------------------------
       - name: Install Helmfile
         run: |
-          curl -Lo helmfile https://github.com/helmfile/helmfile/releases/latest/download/helmfile_linux_amd64
+          curl -LfO https://github.com/helmfile/helmfile/releases/download/v0.163.1/helmfile_0.163.1_linux_amd64.tar.gz
+          tar -xf helmfile_0.163.1_linux_amd64.tar.gz
           chmod +x helmfile
           sudo mv helmfile /usr/local/bin/
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v3
-
-      - name: Create Kind Cluster
-        uses: helm/kind-action@v1.10.0
-
-      - name: Render grafana admin secret
-        working-directory: observability/secrets
+      # -------------------------------
+      # Test connectivity with cluster
+      # -------------------------------
+      - name: Test connectivity
         run: |
-          sed \
-            -e "s|\${GRAFANA_USER}|${{ secrets.GRAFANA_USER }}|g" \
-            -e "s|\${GRAFANA_PASSWORD}|${{ secrets.GRAFANA_PASSWORD }}|g" \
-            grafana-admin-secret-template.yaml > grafana-admin-secret.yaml
+          kubectl --kubeconfig kubeconfig.yaml get nodes
+          kubectl --kubeconfig kubeconfig.yaml get pods -A
 
-      - name: Apply admin secret
-        working-directory: observability/secrets
-        run: |
-          kubectl apply -f grafana-admin-secret.yaml
-
+      # -------------------------------
+      # Deploy via Helmfile
+      # -------------------------------
       - name: Deploy Helmfile
-        working-directory: observability
         run: |
-          helmfile sync
+          helmfile --kubeconfig kubeconfig.yaml apply
