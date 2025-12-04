@@ -1,0 +1,46 @@
+name: Deploy Observability Stack
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+
+      - name: Install Helmfile
+        run: |
+          curl -Lo helmfile https://github.com/helmfile/helmfile/releases/latest/download/helmfile_linux_amd64
+          chmod +x helmfile
+          sudo mv helmfile /usr/local/bin/
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Create Kind Cluster
+        uses: helm/kind-action@v1.10.0
+
+      - name: Render grafana admin secret
+        working-directory: observability/secrets
+        run: |
+          sed \
+            -e "s|\${GRAFANA_USER}|${{ secrets.GRAFANA_USER }}|g" \
+            -e "s|\${GRAFANA_PASSWORD}|${{ secrets.GRAFANA_PASSWORD }}|g" \
+            grafana-admin-secret-template.yaml > grafana-admin-secret.yaml
+
+      - name: Apply admin secret
+        working-directory: observability/secrets
+        run: |
+          kubectl apply -f grafana-admin-secret.yaml
+
+      - name: Deploy Helmfile
+        working-directory: observability
+        run: |
+          helmfile sync
