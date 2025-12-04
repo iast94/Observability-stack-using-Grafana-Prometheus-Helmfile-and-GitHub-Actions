@@ -1,0 +1,75 @@
+admin:
+  existingSecret: grafana-admin
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: 3000
+  initialDelaySeconds: 20
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+startupProbe:
+  httpGet:
+    path: /api/health
+    port: 3000
+  failureThreshold: 60
+  periodSeconds: 10
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 472
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext:
+  fsGroup: 472
+  runAsNonRoot: true
+
+sidecar:
+  dashboards:
+    enabled: true
+    searchNamespace: ALL
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://kube-prometheus-stack-prometheus.observability.svc.cluster.local
+        access: proxy
+        isDefault: true
+
+dashboards:
+  default:
+    node-exporter:
+      json: |
+        {
+          "title": "Node Exporter Overview",
+          "uid": "node-exp-1",
+          "version": 1
+        }
+
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
